@@ -92,7 +92,7 @@ get_widget <- function(comparison_item, category, gprop, hl, cookie_url) {
   # get the tokens etc., using the URL and the cookie_handler
   widget <- curl::curl_fetch_memory(url, handle = .pkgenv[["cookie_handler"]])
 
-  stopifnot(widget$status_code == 200)
+  # stopifnot(widget$status_code == 200)
 
   ## Fix encoding issue for keywords like österreich"
   temp <- rawToChar(widget$content)
@@ -128,7 +128,7 @@ interest_over_time <- function(widget, comparison_item) {
   
   res <- curl::curl_fetch_memory(url)
 
-  stopifnot(res$status_code == 200)
+  # stopifnot(res$status_code == 200)
 
   # ****************************************************************************
   # Format the results in a nice way
@@ -177,137 +177,7 @@ interest_over_time <- function(widget, comparison_item) {
 }
 
 
-interest_by_region <- function(widget, comparison_item, low_search_volume) {
-  i <- which(grepl("Interest by", widget$title) == TRUE)
 
-  if (length(i) == 0) {
-    return(list(NULL))
-  }
-  
-  ## Interest by region need to be retreived individually
-
-  # resolution <- sub(".* (\\w+)$", "\\1", widget$title[i])
-  # resolution[resolution == "subregion"] <- "region"
-  # resolution[resolution == "metro"] <- "dma"
-
-  # resolution <- c(resolution, rep(c("city", "dma"), each = length(resolution)))
-
-  ##
-  resolution <-
-    expand.grid(i, c(ifelse(
-      grepl("world", na.omit(widget$geo)), "country", "region"
-    ), "city", "dma"), stringsAsFactors = FALSE)
-
-  resolution <- unique(resolution)
-
-  i <- resolution$Var1
-  resolution <- resolution$Var2
-
-  ## If it is not US metro, then also search for "city"
-  # if (!all(grepl("dma", resolution))) {
-  #   resolution <- c(resolution, rep("city", length(resolution)))
-  # }
-  #
-
-  ## If no country is specified, resolution should be "COUNTRY"
-  # resolution[grepl("world", na.omit(widget$geo))] <- "country"
-  resolution <- toupper(resolution)
-
-  res <-
-    mapply(
-      create_geo_payload,
-      i,
-      resolution,
-      MoreArgs = list(widget = widget, low_search_volume = low_search_volume),
-      SIMPLIFY = FALSE
-    )
-
-  ## Remove duplicated
-  ii <- !duplicated(res)
-  res <- res[ii]
-  resolution <- resolution[ii]
-
-  ## Remove NA
-  ii <- !unlist(lapply(res, is.null))
-  res <- res[ii]
-  resolution <- resolution[ii]
-
-
-  res <- setNames(res, tolower(resolution))
-
-  return(res)
-}
-
-
-create_geo_payload <- function(i, widget, resolution, low_search_volume) {
-  payload2 <- list()
-  payload2$locale <- unique(na.omit(widget$request$locale))
-  payload2$comparisonItem <- widget$request$comparisonItem[[i]]
-  payload2$resolution <- resolution
-  payload2$requestOptions$backend <- widget$request$requestOptions$backend[i]
-  payload2$requestOptions$property <- widget$request$requestOptions$property[i]
-  payload2$requestOptions$category <- widget$request$requestOptions$category[i]
-  payload2$geo <- as.list((widget$request$geo[i, , drop = FALSE]))
-  payload2$includeLowSearchVolumeGeos <- low_search_volume
-
-
-  url <- URLencode(paste0(
-    "https://www.google.com/trends/api/widgetdata/comparedgeo/csv?req=",
-    jsonlite::toJSON(payload2, auto_unbox = T),
-    "&token=", widget$token[i],
-    "&tz=300&hl=en-US"
-  ))
-
-  url <- encode_keyword(url)
-  res <- curl::curl_fetch_memory(url)
-
-  if (res$status_code != 200) {
-    return(NULL)
-  }
-
-  con <- textConnection(rawToChar(res$content))
-  df <- read.csv(con, skip = 1, stringsAsFactors = FALSE)
-  close(con)
-
-  if (nrow(df) == 0) {
-    return(NULL)
-  }
-
-  n <- nrow(df) # used to reshape the data
-
-  df <- reshape(
-    df,
-    varying = names(df)[2:ncol(df)],
-    v.names = "hits",
-    direction = "long",
-    timevar = "temp",
-    times = names(df)[2:ncol(df)]
-  )
-
-
-  kw <- do.call(rbind, widget$request$comparisonItem[[i]]$complexKeywordsRestriction$keyword)
-
-  df <- cbind(
-    df,
-    kw[rep(seq_len(nrow(kw)), each = n), 2],
-    row.names = NULL,
-    stringsAsFactors = FALSE
-  )
-
-  df$temp <- NULL
-  # df$geo <- widget$geo[i]
-  df$geo <- suppressWarnings(na.omit(unlist(widget$request$geo[i, ])))
-
-  df$geo <- ifelse(is.null(df$geo), "world", df$geo)
-  df$gprop <- ifelse(widget$request$requestOptions$property[i] == "", "web", widget$request$requestOptions$property[i])
-
-  df$id <- NULL
-  rownames(df) <- NULL
-
-  names(df) <- c("location", "hits", "keyword", "geo", "gprop")
-
-  return(df)
-}
 
 ## Remove NA from list
 na.omit.list <- function(y) {
